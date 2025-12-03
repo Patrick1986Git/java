@@ -1,0 +1,47 @@
+USE enterprise;					
+					
+CREATE TABLE IF NOT EXISTS persons (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  surname VARCHAR(100) NOT NULL,
+  age INT,
+  date_of_birth DATE,
+  start_date DATE,
+  salary DOUBLE,
+  position VARCHAR(100),
+  university VARCHAR(200),
+  year INT
+);
+					
+CREATE TABLE IF NOT EXISTS roles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(100) NOT NULL UNIQUE,
+  password_hash VARBINARY(255) NOT NULL,
+  salt VARBINARY(64),
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id INT NOT NULL,
+  role_id INT NOT NULL,
+  PRIMARY KEY (user_id, role_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+);
+
+-- seed roles
+INSERT INTO roles (name) VALUES ('ROLE_ADMIN')
+ON DUPLICATE KEY UPDATE name = name;
+
+INSERT INTO roles (name) VALUES ('ROLE_USER')
+ON DUPLICATE KEY UPDATE name = name;
+
+
