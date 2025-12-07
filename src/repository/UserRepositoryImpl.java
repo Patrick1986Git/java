@@ -102,7 +102,22 @@ public class UserRepositoryImpl {
 			ps.setBoolean(3, mustChange);
 			ps.setDate(4, Date.valueOf(LocalDate.now()));
 			ps.setString(5, username);
-			ps.executeUpdate();
+
+			// log przed wykonaniem (info)
+			utils.LoggerUtil.info("Updating password for user: " + username);
+
+			int updated = ps.executeUpdate();
+
+			if (updated > 0) {
+				utils.LoggerUtil.log(java.util.logging.Level.INFO,
+						"Password update affected " + updated + " row(s) for user=" + username);
+			} else {
+				utils.LoggerUtil.log(java.util.logging.Level.WARNING,
+						"Password update affected 0 rows for user=" + username);
+			}
+		} catch (SQLException ex) {
+			utils.LoggerUtil.error("Failed to update password for user: " + username, ex);
+			throw ex;
 		}
 	}
 
