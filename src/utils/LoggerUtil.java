@@ -12,21 +12,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.logging.*;
 
 /**
- * Enterprise-like Logger utility.
- *
- * - zapisuje logi do konsoli oraz do pliku logs/app-%g.log (rotacja po
- * rozmiarze) - asynchroniczne zapisywanie przez
- * AppExecutors.BACKGROUND_EXECUTOR - custom formatter: timestamp, level,
- * thread, user (jeżeli zalogowany), message
- *
- * Jeśli później chcesz rotację "dzienną" lub zaawansowane polityki — polecam
- * Logback/SLF4J.
+ * Enterprise-like Logger utility with separate audit logger (JSON lines).
  */
 public final class LoggerUtil {
 	private static final Logger LOG = Logger.getLogger("enterprise.app");
+	private static final Logger AUDIT_LOG = Logger.getLogger("enterprise.audit");
 	private static final String LOG_DIR = "logs";
-	private static final String LOG_PATTERN = LOG_DIR + File.separator + "app-%g.log";
-	// limit 10MB per file, keep 7 rotating files
+	private static final String APP_PATTERN = LOG_DIR + File.separator + "app-%g.log";
+	private static final String AUDIT_PATTERN = LOG_DIR + File.separator + "audit-%g.log";
 	private static final int LIMIT = 10 * 1024 * 1024;
 	private static final int COUNT = 7;
 	private static final DateTimeFormatter TS_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS")
@@ -41,43 +34,54 @@ public final class LoggerUtil {
 
 	private static void configure() {
 		try {
-			LOG.setUseParentHandlers(false); // wyłącz domyślny handler żeby mieć pełną kontrolę
+			LOG.setUseParentHandlers(false);
+			AUDIT_LOG.setUseParentHandlers(false);
 
-			// 1) Console handler (kolor/format prosty)
+			// Console handler for app logger
 			ConsoleHandler ch = new ConsoleHandler();
 			ch.setLevel(Level.ALL);
 			ch.setFormatter(new ContextFormatter());
 			LOG.addHandler(ch);
 
-			// 2) Ensure logs directory exists
+			// Ensure logs dir exists
 			File logDir = new File(LOG_DIR);
 			if (!logDir.exists()) {
 				boolean ok = logDir.mkdirs();
 				if (!ok) {
-					// jeżeli nie uda się utworzyć katalogu, logujemy do konsoli i kontynuujemy
 					System.err.println("LoggerUtil: failed to create logs dir: " + logDir.getAbsolutePath());
 				}
 			}
 
-			// 3) File handler with rotation by size
-			FileHandler fh = new FileHandler(LOG_PATTERN, LIMIT, COUNT, true);
+			// File handler for app logger (rotating)
+			FileHandler fh = new FileHandler(APP_PATTERN, LIMIT, COUNT, true);
 			fh.setLevel(Level.ALL);
 			fh.setFormatter(new ContextFormatter());
 			LOG.addHandler(fh);
-
-			// 4) Ustaw poziom globalny (możesz zmienić na INFO w produkcji)
 			LOG.setLevel(Level.ALL);
 
-			// a small startup message
+			// File handler for audit logger (rotating) - simple plain text JSON lines
+			FileHandler auditFh = new FileHandler(AUDIT_PATTERN, LIMIT, COUNT, true);
+			auditFh.setLevel(Level.ALL);
+			auditFh.setFormatter(new SimpleFormatter() {
+				private final DateTimeFormatter fmt = TS_FORMATTER;
+
+				@Override
+				public synchronized String format(LogRecord record) {
+					// We will write pre-built JSON in message; preserve newline
+					return formatMessage(record) + System.lineSeparator();
+				}
+			});
+			AUDIT_LOG.addHandler(auditFh);
+			AUDIT_LOG.setLevel(Level.ALL);
+
 			LOG.info("LoggerUtil initialized. Logs directory: " + logDir.getAbsolutePath());
 		} catch (IOException e) {
-			// Jeżeli FileHandler nie zadziała — wypisz do stderr i zostaw konsolę
 			System.err.println("LoggerUtil configuration failed: " + e.getMessage());
 			e.printStackTrace();
 		}
 	}
 
-	// Formatter który dodaje timestamp, level, thread i user (jeżeli dostępny)
+	// Formatter with context (ts, level, thread, user)
 	private static class ContextFormatter extends Formatter {
 		@Override
 		public String format(LogRecord record) {
@@ -108,9 +112,7 @@ public final class LoggerUtil {
 		}
 	}
 
-	// core async log method
 	private static void asyncLog(Level level, String msg, Throwable t) {
-		// use background executor to avoid blocking caller threads
 		AppExecutors.BACKGROUND_EXECUTOR.submit(() -> {
 			if (t != null) {
 				LOG.log(level, msg, t);
@@ -136,6 +138,81 @@ public final class LoggerUtil {
 		asyncLog(Level.SEVERE, msg, t);
 	}
 
+	// ========== Audit API ==========
+
+	/**
+	 * Zapisywanie audytu jako JSON jednej linii. - action: np. "CREATE_PERSON",
+	 * "UPDATE_EMPLOYEE", "DELETE_STUDENT", "CHANGE_PASSWORD" - target: np.
+	 * "person:123" albo "user:john" - details: dowolny tekst (można podać krótki
+	 * opis/zmiany)
+	 */
+	public static void audit(String action, String target, String details) {
+		String ts = TS_FORMATTER.format(Instant.now());
+		String user = getCurrentUsername().orElse("system");
+		String thread = Thread.currentThread().getName();
+		String json = buildJsonLine(ts, user, thread, action, target, details);
+		// audit should be append-only and fast: we still submit to background executor
+		AppExecutors.BACKGROUND_EXECUTOR.submit(() -> {
+			// put into AUDIT_LOG as INFO — SimpleFormatter will just print message
+			AUDIT_LOG.info(json);
+		});
+	}
+
+	private static String buildJsonLine(String ts, String user, String thread, String action, String target,
+			String details) {
+		return "{" + "\"ts\":\"" + escapeJson(ts) + "\"," + "\"user\":\"" + escapeJson(user) + "\"," + "\"thread\":\""
+				+ escapeJson(thread) + "\"," + "\"action\":\"" + escapeJson(action) + "\"," + "\"target\":\""
+				+ escapeJson(target) + "\"," + "\"details\":\"" + escapeJson(details) + "\"" + "}";
+	}
+
+	private static String escapeJson(String s) {
+		if (s == null)
+			return "";
+		StringBuilder sb = new StringBuilder(s.length() + 20);
+		for (char c : s.toCharArray()) {
+			switch (c) {
+			case '"':
+				sb.append("\\\"");
+				break;
+			case '\\':
+				sb.append("\\\\");
+				break;
+			case '\n':
+				sb.append("\\n");
+				break;
+			case '\r':
+				sb.append("\\r");
+				break;
+			case '\t':
+				sb.append("\\t");
+				break;
+			default:
+				if (c < 0x20) {
+					sb.append(String.format("\\u%04x", (int) c));
+				} else {
+					sb.append(c);
+				}
+			}
+		}
+		return sb.toString();
+	}
+
+	// Optional async variant returning future
+	public static java.util.concurrent.CompletableFuture<Void> auditAsync(String action, String target,
+			String details) {
+		java.util.concurrent.CompletableFuture<Void> f = new java.util.concurrent.CompletableFuture<>();
+		AppExecutors.BACKGROUND_EXECUTOR.submit(() -> {
+			try {
+				audit(action, target, details);
+				f.complete(null);
+			} catch (Throwable e) {
+				f.completeExceptionally(e);
+			}
+		});
+		return f;
+	}
+
+	// kept for compatibility
 	public static java.util.concurrent.CompletableFuture<Void> logAsync(Level level, String msg) {
 		java.util.concurrent.CompletableFuture<Void> f = new java.util.concurrent.CompletableFuture<>();
 		AppExecutors.BACKGROUND_EXECUTOR.submit(() -> {

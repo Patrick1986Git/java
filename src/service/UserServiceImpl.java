@@ -3,6 +3,7 @@ package service;
 import model.User;
 import repository.RoleRepository;
 import repository.UserRepositoryImpl;
+import security.AuthManager;
 import utils.LoggerUtil;
 import utils.SecurityUtil;
 
@@ -40,8 +41,12 @@ public class UserServiceImpl implements UserService {
 				u.setMustChangePassword(mustChange); // NEW
 				u.setCreatedAt(LocalDate.now());
 				u.setUpdatedAt(LocalDate.now());
+
 				User saved = repo.save(u);
-				LoggerUtil.log(Level.INFO, "Created user: " + username);
+				LoggerUtil.log(java.util.logging.Level.INFO, "Created user: username=" + saved.getUsername()
+						+ " by user=" + AuthManager.get().getCurrentUsernameOrSystem());
+				LoggerUtil.audit("CREATE_USER", "user:" + saved.getUsername(),
+						"mustChange=" + saved.isMustChangePassword());
 				return saved;
 			} catch (Exception ex) {
 				LoggerUtil.error("Create user failed", ex);
@@ -85,6 +90,9 @@ public class UserServiceImpl implements UserService {
 				if (roleId == null)
 					throw new RuntimeException("Role not found");
 				repo.assignRole(u.getId(), roleId);
+				LoggerUtil.log(java.util.logging.Level.INFO, "Assigned role " + roleName + " to user=" + username
+						+ " by " + AuthManager.get().getCurrentUsernameOrSystem());
+				LoggerUtil.audit("ASSIGN_ROLE", "user:" + username, "role=" + roleName);
 			} catch (Exception e) {
 				throw new RuntimeException(e);
 			}
@@ -98,7 +106,10 @@ public class UserServiceImpl implements UserService {
 				byte[] salt = SecurityUtil.generateSalt();
 				byte[] hash = SecurityUtil.hashPassword(newPassword, salt);
 				repo.updatePasswordByUsername(username, hash, salt, false);
-				LoggerUtil.log(Level.INFO, "Password changed for: " + username);
+				LoggerUtil.log(java.util.logging.Level.INFO, "Password changed for user=" + username + " by "
+						+ AuthManager.get().getCurrentUsernameOrSystem());
+				LoggerUtil.audit("CHANGE_PASSWORD", "user:" + username,
+						"changedBy=" + AuthManager.get().getCurrentUsernameOrSystem());
 			} catch (Exception ex) {
 				LoggerUtil.error("Change password failed", ex);
 				throw new RuntimeException(ex);

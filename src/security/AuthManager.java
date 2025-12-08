@@ -32,4 +32,13 @@ public final class AuthManager {
 			return false;
 		return currentUser.getRoles().stream().anyMatch(r -> r.getName().equals(roleName));
 	}
+
+	/**
+	 * Convenience: zwraca nazwę zalogowanego użytkownika lub "system" gdy brak.
+	 * Używaj w logach/audicie żeby zawsze był kontekst.
+	 */
+	public String getCurrentUsernameOrSystem() {
+		User u = currentUser;
+		return u == null ? "system" : (u.getUsername() == null ? "system" : u.getUsername());
+	}
 }
