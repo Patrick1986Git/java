@@ -1,6 +1,7 @@
 package GUI;
 
 import model.Employee;
+import utils.LocalizationManager;
 import utils.validation.ValidationResult;
 
 import javax.swing.*;
@@ -30,6 +31,7 @@ public class EmployeeForm extends AbstractForm<Employee> {
 		tfStartDate = new JFormattedTextField(new SimpleDateFormat("yyyy-MM-dd"));
 
 		build();
+		LocalizationManager.addListener(l -> SwingUtilities.invokeLater(this::rebuild));
 	}
 
 	private void build() {
@@ -41,62 +43,69 @@ public class EmployeeForm extends AbstractForm<Employee> {
 		int y = 0;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Imię:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.name")), c);
 		c.gridx = 1;
 		fields.add(tfName, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Nazwisko:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.surname")), c);
 		c.gridx = 1;
 		fields.add(tfSurname, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Wiek:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.age")), c);
 		c.gridx = 1;
 		fields.add(spAge, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Data urodzenia (yyyy-MM-dd):"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.dob")), c);
 		c.gridx = 1;
 		fields.add(tfDateOfBirth, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Data rozpoczęcia (yyyy-MM-dd):"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.start")), c);
 		c.gridx = 1;
 		fields.add(tfStartDate, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Pensja:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("employee.field.salary")), c);
 		c.gridx = 1;
 		fields.add(spSalary, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Stanowisko:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("employee.field.position")), c);
 		c.gridx = 1;
 		fields.add(tfPosition, c);
 
 		add(fields, BorderLayout.CENTER);
 
 		JPanel buttons = new JPanel();
-		JButton btnSave = new JButton("Zapisz");
-		JButton btnCancel = new JButton("Anuluj");
+		JButton btnSave = new JButton(LocalizationManager.getString("employee.btn.save"));
+		JButton btnCancel = new JButton(LocalizationManager.getString("employee.btn.cancel"));
 		btnSave.addActionListener(e -> controller.onSave(getEntity()));
 		btnCancel.addActionListener(e -> controller.onCancel());
 		buttons.add(btnSave);
 		buttons.add(btnCancel);
 		add(buttons, BorderLayout.SOUTH);
+	}
+
+	private void rebuild() {
+		removeAll();
+		build();
+		revalidate();
+		repaint();
 	}
 
 	@Override
@@ -126,19 +135,17 @@ public class EmployeeForm extends AbstractForm<Employee> {
 		int age = (Integer) spAge.getValue();
 		double salary = (Double) spSalary.getValue();
 
-		// Walidacja centralna
 		ValidationResult vr = utils.validation.FormValidators.validateEmployeeInputs(name, surname, age, dobText,
 				startText, salary, position);
 		if (!vr.isValid()) {
-			JOptionPane.showMessageDialog(this, vr.getMessage(), "Błąd", JOptionPane.WARNING_MESSAGE);
+			JOptionPane.showMessageDialog(this, vr.getMessage(), LocalizationManager.getString("dialog.error.title"),
+					JOptionPane.WARNING_MESSAGE);
 			return null;
 		}
 
-		// Parsowanie dat (już bezpieczne)
 		LocalDate dob = utils.validation.FormValidators.parseDateOrNull(dobText);
 		LocalDate start = utils.validation.FormValidators.parseDateOrNull(startText);
 
-		// Ustaw dane w encji
 		entity.setName(name);
 		entity.setSurname(surname);
 		entity.setPosition(position);
@@ -149,5 +156,4 @@ public class EmployeeForm extends AbstractForm<Employee> {
 
 		return entity;
 	}
-
 }

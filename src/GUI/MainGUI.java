@@ -7,6 +7,7 @@ import service.EmployeeService;
 import service.PersonService;
 import service.StudentService;
 import utils.CsvUtil;
+import utils.LocalizationManager;
 import utils.LoggerUtil;
 import utils.concurrent.AppExecutors;
 import security.AuthManager;
@@ -18,8 +19,8 @@ import java.io.File;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
-import java.util.logging.Level;
 
 /**
  * Główne okno aplikacji. Obsługuje asynchroniczne operacje (CompletableFuture).
@@ -63,15 +64,15 @@ public class MainGUI extends JFrame {
 		setLocationRelativeTo(null);
 
 		JPanel top = new JPanel();
-		JButton btnPrev = new JButton("<");
-		JButton btnNext = new JButton(">");
+		JButton btnPrev = new JButton(LocalizationManager.getString("main.btn.prev"));
+		JButton btnNext = new JButton(LocalizationManager.getString("main.btn.next"));
 		JComboBox<String> cbEntity = new JComboBox<>(new String[] { "PERSON", "EMPLOYEE", "STUDENT" });
-		btnAdd = new JButton("Dodaj");
-		btnEdit = new JButton("Edytuj");
-		btnDelete = new JButton("Usuń");
-		JButton btnExport = new JButton("Eksport CSV");
+		btnAdd = new JButton(LocalizationManager.getString("main.btn.add"));
+		btnEdit = new JButton(LocalizationManager.getString("main.btn.edit"));
+		btnDelete = new JButton(LocalizationManager.getString("main.btn.delete"));
+		JButton btnExport = new JButton(LocalizationManager.getString("main.btn.export"));
 
-		top.add(new JLabel("Encja:"));
+		top.add(new JLabel(LocalizationManager.getString("main.entity.label")));
 		top.add(cbEntity);
 		top.add(btnPrev);
 		top.add(btnNext);
@@ -80,24 +81,45 @@ public class MainGUI extends JFrame {
 		top.add(btnDelete);
 		top.add(btnExport);
 
-		// po prawej pokaż aktualnego usera
+		// language selector
+		top.add(Box.createHorizontalStrut(16));
+		top.add(new JLabel(LocalizationManager.getString("combo.lang.label")));
+		JComboBox<Locale> langCombo = new JComboBox<>(new Locale[] { new Locale("pl"), Locale.ENGLISH });
+		// renderer to show user-friendly names
+		langCombo.setRenderer(new DefaultListCellRenderer() {
+			@Override
+			public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
+					boolean isSelected, boolean cellHasFocus) {
+				super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+				if (value instanceof Locale) {
+					Locale loc = (Locale) value;
+					if ("pl".equals(loc.getLanguage()))
+						setText(LocalizationManager.getString("lang.pl"));
+					else if ("en".equals(loc.getLanguage()))
+						setText(LocalizationManager.getString("lang.en"));
+					else
+						setText(loc.getDisplayName(loc));
+				}
+				return this;
+			}
+		});
+		langCombo.setSelectedItem(LocalizationManager.getLocale());
+		langCombo.addActionListener(e -> {
+			Locale selected = (Locale) langCombo.getSelectedItem();
+			if (selected != null) {
+				LocalizationManager.setLocale(selected);
+			}
+		});
+		top.add(langCombo);
+
+		// current user label
 		lblCurrentUser = new JLabel();
-		AuthManager.get().getCurrentUser().ifPresent(u -> lblCurrentUser.setText("U: " + u.getUsername()));
+		AuthManager.get().getCurrentUser().ifPresent(
+				u -> lblCurrentUser.setText(LocalizationManager.getString("main.lbl.user", u.getUsername())));
 		top.add(Box.createHorizontalStrut(16));
 		top.add(lblCurrentUser);
 
 		getContentPane().add(top, BorderLayout.NORTH);
-
-		table.setModel(tableModel);
-		table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-		JScrollPane sp = new JScrollPane(table);
-		getContentPane().add(sp, BorderLayout.CENTER);
-
-		JPanel bottom = new JPanel();
-		bottom.add(new JLabel("Strona:"));
-		JLabel lblPage = new JLabel(String.valueOf(page + 1));
-		bottom.add(lblPage);
-		getContentPane().add(bottom, BorderLayout.SOUTH);
 
 		// listeners
 		cbEntity.addActionListener(e -> {
@@ -119,6 +141,9 @@ public class MainGUI extends JFrame {
 		btnDelete.addActionListener(e -> onDelete());
 		btnExport.addActionListener(e -> onExport());
 
+		table.setModel(tableModel);
+		getContentPane().add(new JScrollPane(table), BorderLayout.CENTER);
+		
 		table.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
 			@Override
 			public void mouseClicked(java.awt.event.MouseEvent e) {
@@ -128,6 +153,22 @@ public class MainGUI extends JFrame {
 				asc = !asc;
 				loadData();
 			}
+		});
+
+		LocalizationManager.addListener(newLocale -> {
+			// update static strings on EDT
+			SwingUtilities.invokeLater(() -> {
+				// update top buttons/labels
+				btnAdd.setText(LocalizationManager.getString("main.btn.add"));
+				btnEdit.setText(LocalizationManager.getString("main.btn.edit"));
+				btnDelete.setText(LocalizationManager.getString("main.btn.delete"));
+				btnExport.setText(LocalizationManager.getString("main.btn.export"));
+				// update label for current user (if present)
+				AuthManager.get().getCurrentUser().ifPresent(
+						u -> lblCurrentUser.setText(LocalizationManager.getString("main.lbl.user", u.getUsername())));
+				// update other UI pieces (table headers)
+				// you can call loadData() to refresh column names (see below)
+			});
 		});
 
 		// ustawienia zależne od roli
@@ -146,17 +187,20 @@ public class MainGUI extends JFrame {
 	 */
 	private void loadData() {
 		switch (currentEntity) {
-		case "PERSON" -> personService.findAll(page, size, sortBy, asc)
-				.thenAccept(list -> SwingUtilities.invokeLater(() -> updateTableForPersons(list)))
-				.exceptionally(ex -> handleLoadError("person", ex));
+		case "PERSON" -> personService.findAll(page, size, sortBy, asc).thenAccept(list -> {
+			LoggerUtil.info("Loaded " + list.size() + " persons from DB (page=" + page + ")");
+			SwingUtilities.invokeLater(() -> updateTableForPersons(list));
+		}).exceptionally(ex -> handleLoadError("person", ex));
 
-		case "EMPLOYEE" -> employeeService.findAll(page, size, sortBy, asc)
-				.thenAccept(list -> SwingUtilities.invokeLater(() -> updateTableForEmployees(list)))
-				.exceptionally(ex -> handleLoadError("employee", ex));
+		case "EMPLOYEE" -> employeeService.findAll(page, size, sortBy, asc).thenAccept(list -> {
+			LoggerUtil.info("Loaded " + list.size() + " employees from DB (page=" + page + ")");
+			SwingUtilities.invokeLater(() -> updateTableForEmployees(list));
+		}).exceptionally(ex -> handleLoadError("employee", ex));
 
-		case "STUDENT" -> studentService.findAll(page, size, sortBy, asc)
-				.thenAccept(list -> SwingUtilities.invokeLater(() -> updateTableForStudents(list)))
-				.exceptionally(ex -> handleLoadError("student", ex));
+		case "STUDENT" -> studentService.findAll(page, size, sortBy, asc).thenAccept(list -> {
+			LoggerUtil.info("Loaded " + list.size() + " students from DB (page=" + page + ")");
+			SwingUtilities.invokeLater(() -> updateTableForStudents(list));
+		}).exceptionally(ex -> handleLoadError("student", ex));
 
 		default -> LoggerUtil.warn("Nieznany typ encji: " + currentEntity);
 		}
@@ -172,19 +216,30 @@ public class MainGUI extends JFrame {
 
 	// ===== update table methods (UI on EDT) =====
 	private void updateTableForPersons(List<Person> list) {
-		String[] cols = new String[] { "id", "name", "surname", "age", "dateOfBirth", "startDate" };
+		String[] cols = new String[] { "id", LocalizationManager.getString("person.field.name"),
+				LocalizationManager.getString("person.field.surname"),
+				LocalizationManager.getString("person.field.age"), LocalizationManager.getString("person.field.dob"),
+				LocalizationManager.getString("person.field.start"), };
 		tableModel.setDataVector(toTableDataForPersons(list), cols);
 	}
 
 	private void updateTableForEmployees(List<Employee> list) {
-		String[] cols = new String[] { "id", "name", "surname", "age", "dateOfBirth", "startDate", "salary",
-				"position" };
+		String[] cols = new String[] { "id", LocalizationManager.getString("person.field.name"),
+				LocalizationManager.getString("person.field.surname"),
+				LocalizationManager.getString("person.field.age"), LocalizationManager.getString("person.field.dob"),
+				LocalizationManager.getString("person.field.start"),
+				LocalizationManager.getString("employee.field.salary"),
+				LocalizationManager.getString("employee.field.position") };
 		tableModel.setDataVector(toTableDataForEmployees(list), cols);
 	}
 
 	private void updateTableForStudents(List<Student> list) {
-		String[] cols = new String[] { "id", "name", "surname", "age", "dateOfBirth", "startDate", "university",
-				"year" };
+		String[] cols = new String[] { "id", LocalizationManager.getString("person.field.name"),
+				LocalizationManager.getString("person.field.surname"),
+				LocalizationManager.getString("person.field.age"), LocalizationManager.getString("person.field.dob"),
+				LocalizationManager.getString("person.field.start"),
+				LocalizationManager.getString("student.field.university"),
+				LocalizationManager.getString("student.field.year") };
 		tableModel.setDataVector(toTableDataForStudents(list), cols);
 	}
 
@@ -291,7 +346,8 @@ public class MainGUI extends JFrame {
 	private void onEdit() {
 		int row = table.getSelectedRow();
 		if (row < 0) {
-			JOptionPane.showMessageDialog(this, "Wybierz wiersz");
+			JOptionPane.showMessageDialog(this, LocalizationManager.getString("ui.select.row"),
+					LocalizationManager.getString("dialog.error.title"), JOptionPane.WARNING_MESSAGE);
 			return;
 		}
 		Integer id = (Integer) table.getValueAt(row, 0);
@@ -360,7 +416,8 @@ public class MainGUI extends JFrame {
 			return;
 		}
 		Integer id = (Integer) table.getValueAt(row, 0);
-		int confirm = JOptionPane.showConfirmDialog(this, "Usunąć?", "Potwierdź", JOptionPane.YES_NO_OPTION);
+		int confirm = JOptionPane.showConfirmDialog(this, LocalizationManager.getString("ui.confirm.delete"),
+				LocalizationManager.getString("dialog.confirm.title"), JOptionPane.YES_NO_OPTION);
 		if (confirm != JOptionPane.YES_OPTION)
 			return;
 
@@ -403,8 +460,9 @@ public class MainGUI extends JFrame {
 			try {
 				CsvUtil.writeCsv(f.getAbsolutePath(), rows);
 				LoggerUtil.info("Wyeksportowano CSV: " + f.getAbsolutePath());
-				SwingUtilities.invokeLater(
-						() -> JOptionPane.showMessageDialog(this, "Wyeksportowano do " + f.getAbsolutePath()));
+				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+						LocalizationManager.getString("ui.export.success", f.getAbsolutePath()),
+						LocalizationManager.getString("dialog.info.title"), JOptionPane.INFORMATION_MESSAGE));
 			} catch (Exception ex) {
 				LoggerUtil.error("Export failed", ex);
 				SwingUtilities

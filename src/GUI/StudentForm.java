@@ -1,6 +1,7 @@
 package GUI;
 
 import model.Student;
+import utils.LocalizationManager;
 import utils.validation.ValidationResult;
 
 import javax.swing.*;
@@ -30,6 +31,7 @@ public class StudentForm extends AbstractForm<Student> {
 		tfStartDate = new JFormattedTextField(new SimpleDateFormat("yyyy-MM-dd"));
 
 		build();
+		LocalizationManager.addListener(l -> SwingUtilities.invokeLater(this::rebuild));
 	}
 
 	private void build() {
@@ -41,62 +43,69 @@ public class StudentForm extends AbstractForm<Student> {
 		int y = 0;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Imię:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.name")), c);
 		c.gridx = 1;
 		fields.add(tfName, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Nazwisko:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.surname")), c);
 		c.gridx = 1;
 		fields.add(tfSurname, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Wiek:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.age")), c);
 		c.gridx = 1;
 		fields.add(spAge, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Data urodzenia (yyyy-MM-dd):"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.dob")), c);
 		c.gridx = 1;
 		fields.add(tfDateOfBirth, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Data rozpoczęcia (yyyy-MM-dd):"), c);
+		fields.add(new JLabel(LocalizationManager.getString("person.field.start")), c);
 		c.gridx = 1;
 		fields.add(tfStartDate, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Uczelnia:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("student.field.university")), c);
 		c.gridx = 1;
 		fields.add(tfUniversity, c);
 
 		y++;
 		c.gridx = 0;
 		c.gridy = y;
-		fields.add(new JLabel("Rok:"), c);
+		fields.add(new JLabel(LocalizationManager.getString("student.field.year")), c);
 		c.gridx = 1;
 		fields.add(spYear, c);
 
 		add(fields, BorderLayout.CENTER);
 
 		JPanel buttons = new JPanel();
-		JButton btnSave = new JButton("Zapisz");
-		JButton btnCancel = new JButton("Anuluj");
+		JButton btnSave = new JButton(LocalizationManager.getString("student.btn.save"));
+		JButton btnCancel = new JButton(LocalizationManager.getString("student.btn.cancel"));
 		btnSave.addActionListener(e -> controller.onSave(getEntity()));
 		btnCancel.addActionListener(e -> controller.onCancel());
 		buttons.add(btnSave);
 		buttons.add(btnCancel);
 		add(buttons, BorderLayout.SOUTH);
+	}
+
+	private void rebuild() {
+		removeAll();
+		build();
+		revalidate();
+		repaint();
 	}
 
 	@Override
@@ -115,38 +124,36 @@ public class StudentForm extends AbstractForm<Student> {
 
 	@Override
 	public Student getEntity() {
-	    if (entity == null)
-	        entity = new Student(null, "", "", 20, null, null, "", 1);
+		if (entity == null)
+			entity = new Student(null, "", "", 20, null, null, "", 1);
 
-	    String name = tfName.getText().trim();
-	    String surname = tfSurname.getText().trim();
-	    String university = tfUniversity.getText().trim();
-	    String dobText = tfDateOfBirth.getText().trim();
-	    String startText = tfStartDate.getText().trim();
-	    int age = (Integer) spAge.getValue();
-	    int year = (Integer) spYear.getValue();
+		String name = tfName.getText().trim();
+		String surname = tfSurname.getText().trim();
+		String university = tfUniversity.getText().trim();
+		String dobText = tfDateOfBirth.getText().trim();
+		String startText = tfStartDate.getText().trim();
+		int age = (Integer) spAge.getValue();
+		int year = (Integer) spYear.getValue();
 
-	    // Walidacja centralna
-		ValidationResult vr = utils.validation.FormValidators.validateStudentInputs(
-	            name, surname, age, dobText, startText, university, year);
-	    if (!vr.isValid()) {
-	        JOptionPane.showMessageDialog(this, vr.getMessage(), "Błąd", JOptionPane.WARNING_MESSAGE);
-	        return null;
-	    }
+		ValidationResult vr = utils.validation.FormValidators.validateStudentInputs(name, surname, age, dobText,
+				startText, university, year);
+		if (!vr.isValid()) {
+			JOptionPane.showMessageDialog(this, vr.getMessage(), LocalizationManager.getString("dialog.error.title"),
+					JOptionPane.WARNING_MESSAGE);
+			return null;
+		}
 
-	    LocalDate dob = utils.validation.FormValidators.parseDateOrNull(dobText);
-	    LocalDate start = utils.validation.FormValidators.parseDateOrNull(startText);
+		LocalDate dob = utils.validation.FormValidators.parseDateOrNull(dobText);
+		LocalDate start = utils.validation.FormValidators.parseDateOrNull(startText);
 
-	    // Ustaw dane
-	    entity.setName(name);
-	    entity.setSurname(surname);
-	    entity.setAge(age);
-	    entity.setUniversity(university);
-	    entity.setYear(year);
-	    entity.setDateOfBirth(dob);
-	    entity.setStartDate(start);
+		entity.setName(name);
+		entity.setSurname(surname);
+		entity.setAge(age);
+		entity.setUniversity(university);
+		entity.setYear(year);
+		entity.setDateOfBirth(dob);
+		entity.setStartDate(start);
 
-	    return entity;
+		return entity;
 	}
-
 }
