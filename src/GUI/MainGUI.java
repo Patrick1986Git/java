@@ -1,5 +1,7 @@
 package GUI;
 
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import model.Employee;
 import model.Person;
 import model.Student;
@@ -17,15 +19,12 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.File;
 import java.time.LocalDate;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Główne okno aplikacji. Obsługuje asynchroniczne operacje (CompletableFuture).
- * - formularze zwracają CompletableFuture poprzez kontrolery, - po zakończeniu
- * operacji tabela jest automatycznie odświeżana.
+ * Główne okno aplikacji.
  */
 public class MainGUI extends JFrame {
 
@@ -33,8 +32,8 @@ public class MainGUI extends JFrame {
 	private final EmployeeService employeeService;
 	private final StudentService studentService;
 
-	private final JTable table = new JTable();
-	private final DefaultTableModel tableModel = new DefaultTableModel();
+	private final JTable table;
+	private final DefaultTableModel tableModel;
 
 	private int page = 0;
 	private int size = 20;
@@ -48,34 +47,100 @@ public class MainGUI extends JFrame {
 	private JButton btnEdit;
 	private JButton btnDelete;
 
+	// pola dostępne w całej klasie (używane w listenerach)
+	private JButton btnPrev;
+	private JButton btnNext;
+	private JButton btnExport;
+	private JComboBox<String> cbEntity;
+	private JComboBox<Locale> langCombo;
+	private JLabel lblEntity;
+	private JLabel lblLang;
+
+	// store base preferred sizes for top buttons so normalizeTopButtonWidths won't
+	// grow sizes repeatedly
+	private final Map<JButton, Dimension> baseButtonSizes = new HashMap<>();
+
 	public MainGUI(PersonService personService, EmployeeService employeeService, StudentService studentService) {
-		super("Enterprise MVC App");
+		super();
 		this.personService = personService;
 		this.employeeService = employeeService;
 		this.studentService = studentService;
 
+		tableModel = new DefaultTableModel() {
+			@Override
+			public boolean isCellEditable(int row, int column) {
+				return false; // tabela tylko do odczytu
+			}
+		};
+		table = new JTable(tableModel);
+
+		// Init UI on EDT (constructor may run on EDT; it's fine)
 		initUI();
-		loadData(); // pierwsze załadowanie
+
+		// ensure title and initial data
+		updateWindowTitle();
+		loadData();
+		captureBaseButtonSizes();
+		computeAndApplyLabelWidths();
+		normalizeTopButtonWidths();
 	}
 
 	private void initUI() {
 		setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-		setSize(1000, 600);
+		setSize(1700, 600);
 		setLocationRelativeTo(null);
 
-		JPanel top = new JPanel();
-		JButton btnPrev = new JButton(LocalizationManager.getString("main.btn.prev"));
-		JButton btnNext = new JButton(LocalizationManager.getString("main.btn.next"));
-		JComboBox<String> cbEntity = new JComboBox<>(new String[] { "PERSON", "EMPLOYEE", "STUDENT" });
+		// Use default panel background from L&F for content pane so area outside table
+		// looks standard
+		Color panelBg = UIManager.getColor("Panel.background");
+		if (panelBg != null) {
+			getContentPane().setBackground(panelBg);
+		}
+
+		JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
+		top.setOpaque(true);
+		if (panelBg != null)
+			top.setBackground(panelBg);
+
+		// entity label + combobox
+		lblEntity = new JLabel(LocalizationManager.getString("main.entity.label"));
+		top.add(lblEntity);
+
+		DefaultComboBoxModel<String> entityModel = new DefaultComboBoxModel<>(
+				new String[] { "PERSON", "EMPLOYEE", "STUDENT" });
+		cbEntity = new JComboBox<>(entityModel);
+		cbEntity.setSelectedItem(currentEntity);
+		cbEntity.setRenderer(new DefaultListCellRenderer() {
+			@Override
+			public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
+					boolean cellHasFocus) {
+				super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+				if (value instanceof String) {
+					String code = (String) value;
+					switch (code) {
+					case "PERSON" -> setText(LocalizationManager.getString("entity.person"));
+					case "EMPLOYEE" -> setText(LocalizationManager.getString("entity.employee"));
+					case "STUDENT" -> setText(LocalizationManager.getString("entity.student"));
+					default -> setText(code);
+					}
+				}
+				return this;
+			}
+		});
+		top.add(cbEntity);
+
+		// paging buttons
+		btnPrev = new JButton(LocalizationManager.getString("main.btn.prev"));
+		btnNext = new JButton(LocalizationManager.getString("main.btn.next"));
+		top.add(btnPrev);
+		top.add(btnNext);
+
+		// action buttons
 		btnAdd = new JButton(LocalizationManager.getString("main.btn.add"));
 		btnEdit = new JButton(LocalizationManager.getString("main.btn.edit"));
 		btnDelete = new JButton(LocalizationManager.getString("main.btn.delete"));
-		JButton btnExport = new JButton(LocalizationManager.getString("main.btn.export"));
+		btnExport = new JButton(LocalizationManager.getString("main.btn.export"));
 
-		top.add(new JLabel(LocalizationManager.getString("main.entity.label")));
-		top.add(cbEntity);
-		top.add(btnPrev);
-		top.add(btnNext);
 		top.add(btnAdd);
 		top.add(btnEdit);
 		top.add(btnDelete);
@@ -83,13 +148,14 @@ public class MainGUI extends JFrame {
 
 		// language selector
 		top.add(Box.createHorizontalStrut(16));
-		top.add(new JLabel(LocalizationManager.getString("combo.lang.label")));
-		JComboBox<Locale> langCombo = new JComboBox<>(new Locale[] { new Locale("pl"), Locale.ENGLISH });
-		// renderer to show user-friendly names
+		lblLang = new JLabel(LocalizationManager.getString("combo.lang.label"));
+		top.add(lblLang);
+
+		langCombo = new JComboBox<>(new Locale[] { new Locale("pl"), Locale.ENGLISH });
 		langCombo.setRenderer(new DefaultListCellRenderer() {
 			@Override
-			public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
-					boolean isSelected, boolean cellHasFocus) {
+			public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
+					boolean cellHasFocus) {
 				super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 				if (value instanceof Locale) {
 					Locale loc = (Locale) value;
@@ -104,12 +170,6 @@ public class MainGUI extends JFrame {
 			}
 		});
 		langCombo.setSelectedItem(LocalizationManager.getLocale());
-		langCombo.addActionListener(e -> {
-			Locale selected = (Locale) langCombo.getSelectedItem();
-			if (selected != null) {
-				LocalizationManager.setLocale(selected);
-			}
-		});
 		top.add(langCombo);
 
 		// current user label
@@ -121,96 +181,358 @@ public class MainGUI extends JFrame {
 
 		getContentPane().add(top, BorderLayout.NORTH);
 
-		// listeners
+		// table + scroll:
+		JScrollPane scroll = new JScrollPane(table);
+
+		// --- IMPORTANT fixes for desired look ---
+		// 1) Make viewport (area behind table) use panel background (so area below rows
+		// is grey)
+		Color spBg = panelBg != null ? panelBg : getContentPane().getBackground();
+		scroll.getViewport().setBackground(spBg); // <-- viewport background = panel color
+		scroll.setBackground(spBg); // scroll background same as panel
+		// 2) Keep cells area white by using cell renderer / table background but
+		// do NOT force table to fill the viewport height -> empty area will show
+		// viewport bg.
+		table.setBackground(Color.WHITE);
+		table.setOpaque(true);
+		table.setFillsViewportHeight(false); // <-- do NOT fill viewport
+
+		table.setGridColor(Color.LIGHT_GRAY);
+		table.getTableHeader().setReorderingAllowed(false);
+		table.setFillsViewportHeight(false); // ensure we don't force fill
+
+		getContentPane().add(scroll, BorderLayout.CENTER);
+
+		// Listeners / actions
 		cbEntity.addActionListener(e -> {
 			currentEntity = (String) cbEntity.getSelectedItem();
 			page = 0;
 			loadData();
 		});
+
 		btnPrev.addActionListener(e -> {
-			if (page > 0)
+			if (page > 0) {
 				page--;
-			loadData();
+				loadData();
+			}
 		});
 		btnNext.addActionListener(e -> {
 			page++;
 			loadData();
 		});
+
 		btnAdd.addActionListener(e -> onAdd());
 		btnEdit.addActionListener(e -> onEdit());
 		btnDelete.addActionListener(e -> onDelete());
 		btnExport.addActionListener(e -> onExport());
 
-		table.setModel(tableModel);
-		getContentPane().add(new JScrollPane(table), BorderLayout.CENTER);
-		
+		// double click row opens edit
+		table.addMouseListener(new java.awt.event.MouseAdapter() {
+			public void mouseClicked(java.awt.event.MouseEvent e) {
+				if (e.getClickCount() == 2) {
+					onEdit();
+				}
+			}
+		});
+
+		// sort by header click
 		table.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
 			@Override
 			public void mouseClicked(java.awt.event.MouseEvent e) {
 				int col = table.columnAtPoint(e.getPoint());
-				String name = table.getColumnName(col);
-				sortBy = name.toLowerCase();
-				asc = !asc;
-				loadData();
+				if (col >= 0) {
+					String name = table.getColumnName(col);
+					sortBy = name.toLowerCase();
+					asc = !asc;
+					loadData();
+				}
 			}
 		});
 
-		LocalizationManager.addListener(newLocale -> {
-			// update static strings on EDT
-			SwingUtilities.invokeLater(() -> {
-				// update top buttons/labels
-				btnAdd.setText(LocalizationManager.getString("main.btn.add"));
-				btnEdit.setText(LocalizationManager.getString("main.btn.edit"));
-				btnDelete.setText(LocalizationManager.getString("main.btn.delete"));
-				btnExport.setText(LocalizationManager.getString("main.btn.export"));
-				// update label for current user (if present)
-				AuthManager.get().getCurrentUser().ifPresent(
-						u -> lblCurrentUser.setText(LocalizationManager.getString("main.lbl.user", u.getUsername())));
-				// update other UI pieces (table headers)
-				// you can call loadData() to refresh column names (see below)
-			});
+		// When language changes update texts (and normalize sizes)
+		LocalizationManager.addListener(newLocale -> SwingUtilities.invokeLater(() -> {
+			btnPrev.setText(LocalizationManager.getString("main.btn.prev"));
+			btnNext.setText(LocalizationManager.getString("main.btn.next"));
+			btnAdd.setText(LocalizationManager.getString("main.btn.add"));
+			btnEdit.setText(LocalizationManager.getString("main.btn.edit"));
+			btnDelete.setText(LocalizationManager.getString("main.btn.delete"));
+			btnExport.setText(LocalizationManager.getString("main.btn.export"));
+			lblEntity.setText(LocalizationManager.getString("main.entity.label"));
+			lblLang.setText(LocalizationManager.getString("combo.lang.label"));
+			AuthManager.get().getCurrentUser().ifPresentOrElse(
+					u -> lblCurrentUser.setText(LocalizationManager.getString("main.lbl.user", u.getUsername())),
+					() -> lblCurrentUser.setText(""));
+			// update combos renderers
+			langCombo.repaint();
+			cbEntity.repaint();
+			// re-apply fixed widths computed earlier (we keep stable sizes)
+			normalizeTopButtonWidths();
+			// reload data (so column headers localized)
+			page = Math.max(0, page);
+			loadData();
+			updateWindowTitle();
+		}));
+
+		// language selection action
+		langCombo.addActionListener(e -> {
+			Locale selected = (Locale) langCombo.getSelectedItem();
+			if (selected != null) {
+				LocalizationManager.setLocale(selected);
+			}
 		});
 
-		// ustawienia zależne od roli
+		// role based controls
 		boolean isAdmin = AuthManager.get().hasRole("ROLE_ADMIN");
-		// prosty przykład: tylko admin może usuwać
 		btnDelete.setEnabled(isAdmin);
-		// pozostali przyciski dostępne dla wszystkich (dostosuj wedle potrzeb)
 
-		// Odświeżanie tabeli co 60 sek.
+		// auto refresh
 		AppExecutors.SCHEDULED_EXECUTOR.scheduleAtFixedRate(() -> SwingUtilities.invokeLater(this::loadData), 60, 60,
 				java.util.concurrent.TimeUnit.SECONDS);
+
 	}
 
 	/**
-	 * Ładuje dane odpowiedniej encji (asynchronicznie).
+	 * Zmieniona logika: dla każdego przycisku zapisujemy jako "base" wymiar
+	 * maksymalny biorąc pod uwagę tekst dla PL i EN (żeby nie skakały przy
+	 * przełączeniu).
+	 */
+	private void captureBaseButtonSizes() {
+	    JButton[] buttonsToStore = new JButton[] { btnPrev, btnNext, btnAdd, btnEdit, btnDelete, btnExport };
+	    Locale[] checkLocales = new Locale[] { Locale.ENGLISH, new Locale("pl") };
+
+	    // create off-screen graphics for reliable FontMetrics regardless of L&F initialization
+	    java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+	    Graphics2D gx = bi.createGraphics();
+
+	    for (JButton b : buttonsToStore) {
+	        if (b == null)
+	            continue;
+
+	        Font font = b.getFont();
+	        if (font == null) font = UIManager.getFont("Button.font");
+	        gx.setFont(font);
+	        FontMetrics fm = gx.getFontMetrics(font);
+
+	        int maxW = 0;
+	        int maxH = fm.getHeight();
+
+	        // take into account current preferred size as baseline
+	        Dimension pref = b.getPreferredSize();
+	        if (pref != null) {
+	            maxW = Math.max(maxW, pref.width);
+	            maxH = Math.max(maxH, pref.height);
+	        }
+
+	        String key = inferKeyForButton(b);
+	        if (key != null) {
+	            for (Locale loc : checkLocales) {
+	                String text = getStringForLocale(key, loc);
+	                if (text == null) text = LocalizationManager.getString(key);
+	                if (text != null) {
+	                    int w = fm.stringWidth(text) + 24; // padding
+	                    maxW = Math.max(maxW, w);
+	                    maxH = Math.max(maxH, fm.getHeight() + 6);
+	                }
+	            }
+	        } else {
+	            // fallback: measure current button text
+	            String text = b.getText();
+	            if (text != null) {
+	                maxW = Math.max(maxW, fm.stringWidth(text) + 24);
+	            }
+	        }
+
+	        baseButtonSizes.put(b, new Dimension(maxW, maxH));
+	    }
+
+	    gx.dispose();
+	}
+
+
+	// helper: approximate mapping from JButton instance to localization key
+	private String inferKeyForButton(JButton b) {
+		if (b == btnPrev)
+			return "main.btn.prev";
+		if (b == btnNext)
+			return "main.btn.next";
+		if (b == btnAdd)
+			return "main.btn.add";
+		if (b == btnEdit)
+			return "main.btn.edit";
+		if (b == btnDelete)
+			return "main.btn.delete";
+		if (b == btnExport)
+			return "main.btn.export";
+		return null;
+	}
+
+	// small helper to load a single localized string for given locale using same
+	// base as LocalizationManager
+	private String getStringForLocale(String key, Locale locale) {
+		try {
+			// replicate the UTF-8 ResourceBundle control used in LocalizationManager
+			ResourceBundle.Control utf8Control = new ResourceBundle.Control() {
+				@Override
+				public ResourceBundle newBundle(String baseName, Locale locale, String format, ClassLoader loader,
+						boolean reload) throws IllegalAccessException, InstantiationException, java.io.IOException {
+					String bundleName = toBundleName(baseName, locale);
+					String resourceName = toResourceName(bundleName, "properties");
+					try (java.io.InputStream stream = loader.getResourceAsStream(resourceName)) {
+						if (stream == null)
+							return null;
+						try (java.io.InputStreamReader reader = new java.io.InputStreamReader(stream,
+								java.nio.charset.StandardCharsets.UTF_8)) {
+							return new java.util.PropertyResourceBundle(reader);
+						}
+					}
+				}
+			};
+			ResourceBundle rb = ResourceBundle.getBundle("resources.i18n.messages", locale,
+					LocalizationManager.class.getClassLoader(), utf8Control);
+			return rb.getString(key);
+		} catch (Exception ex) {
+			return null;
+		}
+	}
+
+	private void computeAndApplyLabelWidths() {
+	    Font font = lblEntity.getFont();
+	    if (font == null) font = UIManager.getFont("Label.font");
+
+	    // off-screen graphics
+	    java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+	    Graphics2D gx = bi.createGraphics();
+	    gx.setFont(font);
+	    FontMetrics fm = gx.getFontMetrics(font);
+
+	    String[] keys = new String[] { "main.entity.label", "combo.lang.label" };
+	    int maxW = 0;
+	    Locale[] checkLocales = new Locale[] { Locale.ENGLISH, new Locale("pl") };
+	    for (String k : keys) {
+	        for (Locale loc : checkLocales) {
+	            String txt = getStringForLocale(k, loc);
+	            if (txt == null) txt = LocalizationManager.getString(k);
+	            if (txt != null) {
+	                int w = fm.stringWidth(txt);
+	                maxW = Math.max(maxW, w);
+	            }
+	        }
+	    }
+	    gx.dispose();
+
+	    // add padding so text never touches edge
+	    maxW += 24;
+	    Dimension dEntity = lblEntity.getPreferredSize();
+	    dEntity = new Dimension(maxW, dEntity.height);
+	    lblEntity.setPreferredSize(dEntity);
+	    Dimension dLang = lblLang.getPreferredSize();
+	    dLang = new Dimension(maxW, dLang.height);
+	    lblLang.setPreferredSize(dLang);
+	    revalidate();
+	    repaint();
+	}
+
+
+	private void updateWindowTitle() {
+		String title = LocalizationManager.getString("app.title");
+		String userPart = AuthManager.get().getCurrentUser()
+				.map(u -> LocalizationManager.getString("main.lbl.user", u.getUsername())).orElse("");
+		if (!userPart.isEmpty())
+			title = title + " — " + userPart;
+		setTitle(title);
+	}
+
+	private void normalizeTopButtonWidths() {
+		List<JButton> list = new ArrayList<>();
+		if (btnPrev != null)
+			list.add(btnPrev);
+		if (btnNext != null)
+			list.add(btnNext);
+		if (btnAdd != null)
+			list.add(btnAdd);
+		if (btnEdit != null)
+			list.add(btnEdit);
+		if (btnDelete != null)
+			list.add(btnDelete);
+		if (btnExport != null)
+			list.add(btnExport);
+
+		int max = 0;
+		for (JButton b : list) {
+			Dimension base = baseButtonSizes.get(b);
+			int width = (base != null) ? base.width : b.getPreferredSize().width;
+			max = Math.max(max, width);
+		}
+		max += 6; // small padding
+		for (JButton b : list) {
+			Dimension base = baseButtonSizes.get(b);
+			int height = (base != null) ? base.height : b.getPreferredSize().height;
+			b.setPreferredSize(new Dimension(max, height));
+		}
+		revalidate();
+		repaint();
+	}
+
+	/**
+	 * Ładuje dane odpowiedniej encji (asynchronicznie) oraz aktualizuje paginację.
 	 */
 	private void loadData() {
 		switch (currentEntity) {
-		case "PERSON" -> personService.findAll(page, size, sortBy, asc).thenAccept(list -> {
-			LoggerUtil.info("Loaded " + list.size() + " persons from DB (page=" + page + ")");
-			SwingUtilities.invokeLater(() -> updateTableForPersons(list));
-		}).exceptionally(ex -> handleLoadError("person", ex));
+		case "PERSON" -> {
+			personService.count().thenAccept(total -> SwingUtilities.invokeLater(() -> updatePaginationControls(total)))
+					.exceptionally(ex -> {
+						LoggerUtil.error("Count persons failed", ex);
+						return null;
+					});
 
-		case "EMPLOYEE" -> employeeService.findAll(page, size, sortBy, asc).thenAccept(list -> {
-			LoggerUtil.info("Loaded " + list.size() + " employees from DB (page=" + page + ")");
-			SwingUtilities.invokeLater(() -> updateTableForEmployees(list));
-		}).exceptionally(ex -> handleLoadError("employee", ex));
+			personService.findAll(page, size, sortBy, asc).thenAccept(list -> {
+				LoggerUtil.info("Loaded " + list.size() + " persons from DB (page=" + page + ")");
+				SwingUtilities.invokeLater(() -> updateTableForPersons(list));
+			}).exceptionally(ex -> handleLoadError("person", ex));
+		}
+		case "EMPLOYEE" -> {
+			employeeService.count()
+					.thenAccept(total -> SwingUtilities.invokeLater(() -> updatePaginationControls(total)))
+					.exceptionally(ex -> {
+						LoggerUtil.error("Count employees failed", ex);
+						return null;
+					});
 
-		case "STUDENT" -> studentService.findAll(page, size, sortBy, asc).thenAccept(list -> {
-			LoggerUtil.info("Loaded " + list.size() + " students from DB (page=" + page + ")");
-			SwingUtilities.invokeLater(() -> updateTableForStudents(list));
-		}).exceptionally(ex -> handleLoadError("student", ex));
+			employeeService.findAll(page, size, sortBy, asc).thenAccept(list -> {
+				LoggerUtil.info("Loaded " + list.size() + " employees from DB (page=" + page + ")");
+				SwingUtilities.invokeLater(() -> updateTableForEmployees(list));
+			}).exceptionally(ex -> handleLoadError("employee", ex));
+		}
+		case "STUDENT" -> {
+			studentService.count()
+					.thenAccept(total -> SwingUtilities.invokeLater(() -> updatePaginationControls(total)))
+					.exceptionally(ex -> {
+						LoggerUtil.error("Count students failed", ex);
+						return null;
+					});
 
+			studentService.findAll(page, size, sortBy, asc).thenAccept(list -> {
+				LoggerUtil.info("Loaded " + list.size() + " students from DB (page=" + page + ")");
+				SwingUtilities.invokeLater(() -> updateTableForStudents(list));
+			}).exceptionally(ex -> handleLoadError("student", ex));
+		}
 		default -> LoggerUtil.warn("Nieznany typ encji: " + currentEntity);
 		}
+		updateWindowTitle();
+	}
 
+	private void updatePaginationControls(long totalRecords) {
+		int maxPage = Math.max(0, (int) ((totalRecords - 1) / size));
+		if (page > maxPage)
+			page = maxPage;
+		btnPrev.setEnabled(page > 0);
+		btnNext.setEnabled(page < maxPage);
 	}
 
 	private Void handleLoadError(String what, Throwable ex) {
 		LoggerUtil.error("Failed to load " + what, ex);
-		SwingUtilities.invokeLater(
-				() -> JOptionPane.showMessageDialog(this, "Błąd ładowania " + what + ": " + ex.getMessage()));
+		SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+				LocalizationManager.getString("ui.load.error", what) + ": " + ex.getMessage()));
 		return null;
 	}
 
@@ -219,7 +541,7 @@ public class MainGUI extends JFrame {
 		String[] cols = new String[] { "id", LocalizationManager.getString("person.field.name"),
 				LocalizationManager.getString("person.field.surname"),
 				LocalizationManager.getString("person.field.age"), LocalizationManager.getString("person.field.dob"),
-				LocalizationManager.getString("person.field.start"), };
+				LocalizationManager.getString("person.field.start") };
 		tableModel.setDataVector(toTableDataForPersons(list), cols);
 	}
 
@@ -294,7 +616,7 @@ public class MainGUI extends JFrame {
 		return date == null ? "" : date.toString();
 	}
 
-	// ===== CRUD flows: show form -> call service -> refresh table =====
+	// ===== CRUD flows =====
 
 	private void onAdd() {
 		switch (currentEntity) {
@@ -304,15 +626,13 @@ public class MainGUI extends JFrame {
 			}).thenCompose(entity -> {
 				if (entity == null)
 					return CompletableFuture.completedFuture(null);
-				// wywołaj service.create (zakładamy, że zwraca CompletableFuture<Person>)
 				return personService.create(entity);
-			}).thenRun(() -> loadData()) // odśwież po stworzeniu
-					.exceptionally(ex -> {
-						LoggerUtil.error("Create person failed", ex);
-						SwingUtilities.invokeLater(
-								() -> JOptionPane.showMessageDialog(this, "Błąd zapisu: " + ex.getMessage()));
-						return null;
-					});
+			}).thenRun(this::loadData).exceptionally(ex -> {
+				LoggerUtil.error("Create person failed", ex);
+				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+						LocalizationManager.getString("ui.save.error", ex.getMessage())));
+				return null;
+			});
 		}
 		case "EMPLOYEE" -> {
 			EmployeeFormController controller = new EmployeeFormController(this);
@@ -322,8 +642,8 @@ public class MainGUI extends JFrame {
 				return employeeService.create(entity);
 			}).thenRun(this::loadData).exceptionally(ex -> {
 				LoggerUtil.error("Create employee failed", ex);
-				SwingUtilities
-						.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd zapisu: " + ex.getMessage()));
+				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+						LocalizationManager.getString("ui.save.error", ex.getMessage())));
 				return null;
 			});
 		}
@@ -335,8 +655,8 @@ public class MainGUI extends JFrame {
 				return studentService.create(entity);
 			}).thenRun(this::loadData).exceptionally(ex -> {
 				LoggerUtil.error("Create student failed", ex);
-				SwingUtilities
-						.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd zapisu: " + ex.getMessage()));
+				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+						LocalizationManager.getString("ui.save.error", ex.getMessage())));
 				return null;
 			});
 		}
@@ -355,7 +675,8 @@ public class MainGUI extends JFrame {
 		switch (currentEntity) {
 		case "PERSON" -> personService.findById(id).thenCompose(opt -> {
 			if (opt.isEmpty()) {
-				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Nie znaleziono"));
+				SwingUtilities.invokeLater(
+						() -> JOptionPane.showMessageDialog(this, LocalizationManager.getString("ui.notfound")));
 				return CompletableFuture.completedFuture(null);
 			}
 			Person p = opt.get();
@@ -367,13 +688,15 @@ public class MainGUI extends JFrame {
 			});
 		}).thenRun(this::loadData).exceptionally(ex -> {
 			LoggerUtil.error("Edit person failed", ex);
-			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd: " + ex.getMessage()));
+			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+					LocalizationManager.getString("ui.edit.error", ex.getMessage())));
 			return null;
 		});
 
 		case "EMPLOYEE" -> employeeService.findById(id).thenCompose(opt -> {
 			if (opt.isEmpty()) {
-				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Nie znaleziono"));
+				SwingUtilities.invokeLater(
+						() -> JOptionPane.showMessageDialog(this, LocalizationManager.getString("ui.notfound")));
 				return CompletableFuture.completedFuture(null);
 			}
 			Employee e = opt.get();
@@ -385,13 +708,15 @@ public class MainGUI extends JFrame {
 			});
 		}).thenRun(this::loadData).exceptionally(ex -> {
 			LoggerUtil.error("Edit employee failed", ex);
-			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd: " + ex.getMessage()));
+			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+					LocalizationManager.getString("ui.edit.error", ex.getMessage())));
 			return null;
 		});
 
 		case "STUDENT" -> studentService.findById(id).thenCompose(opt -> {
 			if (opt.isEmpty()) {
-				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Nie znaleziono"));
+				SwingUtilities.invokeLater(
+						() -> JOptionPane.showMessageDialog(this, LocalizationManager.getString("ui.notfound")));
 				return CompletableFuture.completedFuture(null);
 			}
 			Student s = opt.get();
@@ -403,7 +728,8 @@ public class MainGUI extends JFrame {
 			});
 		}).thenRun(this::loadData).exceptionally(ex -> {
 			LoggerUtil.error("Edit student failed", ex);
-			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd: " + ex.getMessage()));
+			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+					LocalizationManager.getString("ui.edit.error", ex.getMessage())));
 			return null;
 		});
 		}
@@ -412,7 +738,7 @@ public class MainGUI extends JFrame {
 	private void onDelete() {
 		int row = table.getSelectedRow();
 		if (row < 0) {
-			JOptionPane.showMessageDialog(this, "Wybierz wiersz");
+			JOptionPane.showMessageDialog(this, LocalizationManager.getString("ui.select.row"));
 			return;
 		}
 		Integer id = (Integer) table.getValueAt(row, 0);
@@ -432,7 +758,8 @@ public class MainGUI extends JFrame {
 
 		deletionTask.thenRun(this::loadData).exceptionally(ex -> {
 			LoggerUtil.error("Delete failed", ex);
-			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd usuwania: " + ex.getMessage()));
+			SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+					LocalizationManager.getString("ui.delete.error", ex.getMessage())));
 			return null;
 		});
 	}
@@ -444,8 +771,6 @@ public class MainGUI extends JFrame {
 			return;
 		File f = fc.getSelectedFile();
 
-		// Pobierz snapshot danych z modelu tabeli i zapisz asynchronicznie w
-		// IO_EXECUTOR
 		List<String[]> rows = new ArrayList<>();
 		for (int r = 0; r < tableModel.getRowCount(); r++) {
 			String[] row = new String[tableModel.getColumnCount()];
@@ -465,8 +790,8 @@ public class MainGUI extends JFrame {
 						LocalizationManager.getString("dialog.info.title"), JOptionPane.INFORMATION_MESSAGE));
 			} catch (Exception ex) {
 				LoggerUtil.error("Export failed", ex);
-				SwingUtilities
-						.invokeLater(() -> JOptionPane.showMessageDialog(this, "Błąd eksportu: " + ex.getMessage()));
+				SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+						LocalizationManager.getString("ui.export.error", ex.getMessage())));
 			}
 		}, AppExecutors.IO_EXECUTOR);
 	}

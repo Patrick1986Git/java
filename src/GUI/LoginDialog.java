@@ -69,6 +69,13 @@ public class LoginDialog extends JDialog {
 			setVisible(false);
 		});
 
+		// -> default button for Enter:
+		getRootPane().setDefaultButton(btnLogin);
+
+		// allow Enter in fields
+		tfUser.addActionListener(e -> onLogin());
+		pf.addActionListener(e -> onLogin());
+
 		Container cp = getContentPane();
 		cp.setLayout(new BorderLayout());
 		cp.add(p, BorderLayout.CENTER);
@@ -83,29 +90,29 @@ public class LoginDialog extends JDialog {
 	 */
 	private void updateLocalizedTexts() {
 		setTitle(LocalizationManager.getString("login.title"));
-		// zmieniamy teksty etykiet — łatwo jeśli iterujemy po komponentach
-		// -- zakładamy layout: center panel + buttons panel
+
+		// Update labels and buttons in center panel:
 		Container cp = getContentPane();
 		if (cp.getComponentCount() >= 2) {
 			Component center = cp.getComponent(0);
 			if (center instanceof JPanel) {
 				JPanel p = (JPanel) center;
-				// zakładamy ułożenie zgodne z build(): label, field, label, field
-				for (Component comp : p.getComponents()) {
-					if (comp instanceof JLabel) {
-						JLabel lbl = (JLabel) comp;
-						String txt = lbl.getText();
-						// mapowanie prostych etykiet - sprawdź i ustaw nowe jeśli zawiera znane klucze
-						if (txt != null) {
-							// porównuj po poprzednich wartościach kluczy (plausible heurystyka)
-							// ustaw na podstawie pozycji: pierwszy label -> login.user, trzeci ->
-							// login.pass
-						}
+				// assume components: label, field, label, field (in that order)
+				Component[] comps = p.getComponents();
+				int labelIndex = 0;
+				for (int i = 0; i < comps.length; i++) {
+					if (comps[i] instanceof JLabel) {
+						JLabel lbl = (JLabel) comps[i];
+						if (labelIndex == 0)
+							lbl.setText(LocalizationManager.getString("login.user"));
+						else if (labelIndex == 1)
+							lbl.setText(LocalizationManager.getString("login.pass"));
+						labelIndex++;
 					}
 				}
 			}
 		}
-		// aktualizuj buttony
+
 		if (btnLogin != null)
 			btnLogin.setText(LocalizationManager.getString("login.btn.login"));
 		if (btnCancel != null)
