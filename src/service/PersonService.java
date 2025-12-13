@@ -9,6 +9,7 @@ public interface PersonService {
     CompletableFuture<Person> create(Person person);
     CompletableFuture<Optional<Person>> findById(Integer id);
     CompletableFuture<List<Person>> findAll(int page, int size, String sortBy, boolean asc);
+    CompletableFuture<List<Person>> findAll();
     CompletableFuture<Person> update(Person person);
     CompletableFuture<Boolean> deleteById(Integer id);
     CompletableFuture<Long> count();

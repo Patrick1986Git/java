@@ -75,6 +75,18 @@ public class StudentServiceImpl implements StudentService {
 	}
 
 	@Override
+	public CompletableFuture<List<Student>> findAll() {
+		return CompletableFuture.supplyAsync(() -> {
+			try {
+				return repository.findAll();
+			} catch (Exception ex) {
+				LoggerUtil.error("Error finding all students", ex);
+				throw new RuntimeException(ex);
+			}
+		}, AppExecutors.DB_EXECUTOR);
+	}
+
+	@Override
 	public CompletableFuture<Student> update(Student student) {
 		return CompletableFuture.supplyAsync(() -> {
 			try {

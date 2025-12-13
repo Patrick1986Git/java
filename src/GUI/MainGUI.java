@@ -1,13 +1,13 @@
 package GUI;
 
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import model.Employee;
 import model.Person;
 import model.Student;
 import service.EmployeeService;
 import service.PersonService;
+import service.StatisticsService;
 import service.StudentService;
+import ui.controllers.StatisticsController;
 import utils.CsvUtil;
 import utils.LocalizationManager;
 import utils.LoggerUtil;
@@ -32,6 +32,8 @@ public class MainGUI extends JFrame {
 	private final EmployeeService employeeService;
 	private final StudentService studentService;
 
+	private StatisticsController statisticsController;
+
 	private final JTable table;
 	private final DefaultTableModel tableModel;
 
@@ -51,6 +53,7 @@ public class MainGUI extends JFrame {
 	private JButton btnPrev;
 	private JButton btnNext;
 	private JButton btnExport;
+	private JButton btnAgeChart;
 	private JComboBox<String> cbEntity;
 	private JComboBox<Locale> langCombo;
 	private JLabel lblEntity;
@@ -60,11 +63,14 @@ public class MainGUI extends JFrame {
 	// grow sizes repeatedly
 	private final Map<JButton, Dimension> baseButtonSizes = new HashMap<>();
 
-	public MainGUI(PersonService personService, EmployeeService employeeService, StudentService studentService) {
+	public MainGUI(PersonService personService, EmployeeService employeeService, StudentService studentService,
+			StatisticsService statisticsService) {
 		super();
 		this.personService = personService;
 		this.employeeService = employeeService;
 		this.studentService = studentService;
+
+		statisticsController = new StatisticsController(statisticsService);
 
 		tableModel = new DefaultTableModel() {
 			@Override
@@ -97,7 +103,7 @@ public class MainGUI extends JFrame {
 			getContentPane().setBackground(panelBg);
 		}
 
-		JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
+		JPanel top = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 6));
 		top.setOpaque(true);
 		if (panelBg != null)
 			top.setBackground(panelBg);
@@ -140,11 +146,13 @@ public class MainGUI extends JFrame {
 		btnEdit = new JButton(LocalizationManager.getString("main.btn.edit"));
 		btnDelete = new JButton(LocalizationManager.getString("main.btn.delete"));
 		btnExport = new JButton(LocalizationManager.getString("main.btn.export"));
-
+		btnAgeChart = new JButton(LocalizationManager.getString("main.btn.ageChart"));
+		
 		top.add(btnAdd);
 		top.add(btnEdit);
 		top.add(btnDelete);
 		top.add(btnExport);
+		top.add(btnAgeChart);
 
 		// language selector
 		top.add(Box.createHorizontalStrut(16));
@@ -225,6 +233,7 @@ public class MainGUI extends JFrame {
 		btnEdit.addActionListener(e -> onEdit());
 		btnDelete.addActionListener(e -> onDelete());
 		btnExport.addActionListener(e -> onExport());
+		btnAgeChart.addActionListener(e -> statisticsController.showAgeChart());
 
 		// double click row opens edit
 		table.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -257,6 +266,7 @@ public class MainGUI extends JFrame {
 			btnEdit.setText(LocalizationManager.getString("main.btn.edit"));
 			btnDelete.setText(LocalizationManager.getString("main.btn.delete"));
 			btnExport.setText(LocalizationManager.getString("main.btn.export"));
+			btnAgeChart.setText(LocalizationManager.getString("main.btn.ageChart"));			
 			lblEntity.setText(LocalizationManager.getString("main.entity.label"));
 			lblLang.setText(LocalizationManager.getString("combo.lang.label"));
 			AuthManager.get().getCurrentUser().ifPresentOrElse(
@@ -297,57 +307,60 @@ public class MainGUI extends JFrame {
 	 * przełączeniu).
 	 */
 	private void captureBaseButtonSizes() {
-	    JButton[] buttonsToStore = new JButton[] { btnPrev, btnNext, btnAdd, btnEdit, btnDelete, btnExport };
-	    Locale[] checkLocales = new Locale[] { Locale.ENGLISH, new Locale("pl") };
+		JButton[] buttonsToStore = new JButton[] { btnPrev, btnNext, btnAdd, btnEdit, btnDelete, btnExport, btnAgeChart };
+		Locale[] checkLocales = new Locale[] { Locale.ENGLISH, new Locale("pl") };
 
-	    // create off-screen graphics for reliable FontMetrics regardless of L&F initialization
-	    java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-	    Graphics2D gx = bi.createGraphics();
+		// create off-screen graphics for reliable FontMetrics regardless of L&F
+		// initialization
+		java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(1, 1,
+				java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		Graphics2D gx = bi.createGraphics();
 
-	    for (JButton b : buttonsToStore) {
-	        if (b == null)
-	            continue;
+		for (JButton b : buttonsToStore) {
+			if (b == null)
+				continue;
 
-	        Font font = b.getFont();
-	        if (font == null) font = UIManager.getFont("Button.font");
-	        gx.setFont(font);
-	        FontMetrics fm = gx.getFontMetrics(font);
+			Font font = b.getFont();
+			if (font == null)
+				font = UIManager.getFont("Button.font");
+			gx.setFont(font);
+			FontMetrics fm = gx.getFontMetrics(font);
 
-	        int maxW = 0;
-	        int maxH = fm.getHeight();
+			int maxW = 0;
+			int maxH = fm.getHeight();
 
-	        // take into account current preferred size as baseline
-	        Dimension pref = b.getPreferredSize();
-	        if (pref != null) {
-	            maxW = Math.max(maxW, pref.width);
-	            maxH = Math.max(maxH, pref.height);
-	        }
+			// take into account current preferred size as baseline
+			Dimension pref = b.getPreferredSize();
+			if (pref != null) {
+				maxW = Math.max(maxW, pref.width);
+				maxH = Math.max(maxH, pref.height);
+			}
 
-	        String key = inferKeyForButton(b);
-	        if (key != null) {
-	            for (Locale loc : checkLocales) {
-	                String text = getStringForLocale(key, loc);
-	                if (text == null) text = LocalizationManager.getString(key);
-	                if (text != null) {
-	                    int w = fm.stringWidth(text) + 24; // padding
-	                    maxW = Math.max(maxW, w);
-	                    maxH = Math.max(maxH, fm.getHeight() + 6);
-	                }
-	            }
-	        } else {
-	            // fallback: measure current button text
-	            String text = b.getText();
-	            if (text != null) {
-	                maxW = Math.max(maxW, fm.stringWidth(text) + 24);
-	            }
-	        }
+			String key = inferKeyForButton(b);
+			if (key != null) {
+				for (Locale loc : checkLocales) {
+					String text = getStringForLocale(key, loc);
+					if (text == null)
+						text = LocalizationManager.getString(key);
+					if (text != null) {
+						int w = fm.stringWidth(text) + 24; // padding
+						maxW = Math.max(maxW, w);
+						maxH = Math.max(maxH, fm.getHeight() + 6);
+					}
+				}
+			} else {
+				// fallback: measure current button text
+				String text = b.getText();
+				if (text != null) {
+					maxW = Math.max(maxW, fm.stringWidth(text) + 24);
+				}
+			}
 
-	        baseButtonSizes.put(b, new Dimension(maxW, maxH));
-	    }
+			baseButtonSizes.put(b, new Dimension(maxW, maxH));
+		}
 
-	    gx.dispose();
+		gx.dispose();
 	}
-
 
 	// helper: approximate mapping from JButton instance to localization key
 	private String inferKeyForButton(JButton b) {
@@ -363,6 +376,8 @@ public class MainGUI extends JFrame {
 			return "main.btn.delete";
 		if (b == btnExport)
 			return "main.btn.export";
+		if (b == btnExport)
+			return "main.btn.ageChart";
 		return null;
 	}
 
@@ -396,42 +411,47 @@ public class MainGUI extends JFrame {
 	}
 
 	private void computeAndApplyLabelWidths() {
-	    Font font = lblEntity.getFont();
-	    if (font == null) font = UIManager.getFont("Label.font");
+		Font font = lblEntity.getFont();
+		if (font == null)
+			font = UIManager.getFont("Label.font");
 
-	    // off-screen graphics
-	    java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-	    Graphics2D gx = bi.createGraphics();
-	    gx.setFont(font);
-	    FontMetrics fm = gx.getFontMetrics(font);
+		// off-screen graphics
+		java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(1, 1,
+				java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		Graphics2D gx = bi.createGraphics();
+		gx.setFont(font);
+		FontMetrics fm = gx.getFontMetrics(font);
 
-	    String[] keys = new String[] { "main.entity.label", "combo.lang.label" };
-	    int maxW = 0;
-	    Locale[] checkLocales = new Locale[] { Locale.ENGLISH, new Locale("pl") };
-	    for (String k : keys) {
-	        for (Locale loc : checkLocales) {
-	            String txt = getStringForLocale(k, loc);
-	            if (txt == null) txt = LocalizationManager.getString(k);
-	            if (txt != null) {
-	                int w = fm.stringWidth(txt);
-	                maxW = Math.max(maxW, w);
-	            }
-	        }
-	    }
-	    gx.dispose();
+		String[] keys = new String[] { "main.entity.label", "combo.lang.label", "main.lbl.user"};
+		int maxW = 0;
+		Locale[] checkLocales = new Locale[] { Locale.ENGLISH, new Locale("pl") };
+		for (String k : keys) {
+			for (Locale loc : checkLocales) {
+				String txt = getStringForLocale(k, loc);
+				if (txt == null)
+					txt = LocalizationManager.getString(k);
+				if (txt != null) {
+					int w = fm.stringWidth(txt);
+					maxW = Math.max(maxW, w);
+				}
+			}
+		}
+		gx.dispose();
 
-	    // add padding so text never touches edge
-	    maxW += 24;
-	    Dimension dEntity = lblEntity.getPreferredSize();
-	    dEntity = new Dimension(maxW, dEntity.height);
-	    lblEntity.setPreferredSize(dEntity);
-	    Dimension dLang = lblLang.getPreferredSize();
-	    dLang = new Dimension(maxW, dLang.height);
-	    lblLang.setPreferredSize(dLang);
-	    revalidate();
-	    repaint();
+		// add padding so text never touches edge
+		maxW += 24;
+		Dimension dEntity = lblEntity.getPreferredSize();
+		dEntity = new Dimension(maxW, dEntity.height);
+		lblEntity.setPreferredSize(dEntity);
+		Dimension dLang = lblLang.getPreferredSize();
+		dLang = new Dimension(maxW, dLang.height);
+		lblLang.setPreferredSize(dLang);
+		Dimension dUser = lblCurrentUser.getPreferredSize();
+		dUser = new Dimension(maxW, dUser.height);
+		lblCurrentUser.setPreferredSize(dUser);
+		revalidate();
+		repaint();
 	}
-
 
 	private void updateWindowTitle() {
 		String title = LocalizationManager.getString("app.title");
@@ -456,6 +476,8 @@ public class MainGUI extends JFrame {
 			list.add(btnDelete);
 		if (btnExport != null)
 			list.add(btnExport);
+		if (btnAgeChart != null)
+			list.add(btnAgeChart);
 
 		int max = 0;
 		for (JButton b : list) {

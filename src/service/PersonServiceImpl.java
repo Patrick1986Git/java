@@ -73,6 +73,18 @@ public class PersonServiceImpl implements PersonService {
 	}
 
 	@Override
+	public CompletableFuture<List<Person>> findAll() {
+		return CompletableFuture.supplyAsync(() -> {
+			try {
+				return repository.findAll();
+			} catch (Exception ex) {
+				LoggerUtil.error("Error finding all persons", ex);
+				throw new RuntimeException(ex);
+			}
+		}, AppExecutors.DB_EXECUTOR);
+	}
+
+	@Override
 	public CompletableFuture<Person> update(Person person) {
 		return CompletableFuture.supplyAsync(() -> {
 			try {

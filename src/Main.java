@@ -11,18 +11,18 @@ import service.EmployeeService;
 import service.EmployeeServiceImpl;
 import service.PersonService;
 import service.PersonServiceImpl;
+import service.StatisticsService;
 import service.StudentService;
 import service.StudentServiceImpl;
 import service.UserService;
 import service.UserServiceImpl;
 import security.AuthManager;
 import utils.LoggerUtil;
-import utils.concurrent.AppExecutors;
 
 import javax.swing.*;
 import java.sql.Connection;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
+
 import java.util.logging.Level;
 
 /**
@@ -50,27 +50,30 @@ public class Main {
 
 		UserService userService = new UserServiceImpl(userRepo, roleRepo);
 
+		StatisticsService statisticsService = new StatisticsService(personService, employeeService, studentService);
+
 		// 2) Upewnij się że role istnieją i jest admin
 		try {
-		    roleRepo.findOrCreateRole("ROLE_USER");
-		    roleRepo.findOrCreateRole("ROLE_ADMIN");
+			roleRepo.findOrCreateRole("ROLE_USER");
+			roleRepo.findOrCreateRole("ROLE_ADMIN");
 
-		    Optional<User> maybeAdmin = userService.findByUsername("admin").get();
-		    if (maybeAdmin.isEmpty()) {
-		        char[] defaultPass = "admin".toCharArray(); // production: nie rób tak
-		        // użyj przeciążenia createUser z mustChange = true
-		        User created = userService.createUser("admin", defaultPass, true, true).get();
+			Optional<User> maybeAdmin = userService.findByUsername("admin").get();
+			if (maybeAdmin.isEmpty()) {
+				char[] defaultPass = "admin".toCharArray(); // production: nie rób tak
+				// użyj przeciążenia createUser z mustChange = true
+				User created = userService.createUser("admin", defaultPass, true, true).get();
 
-		        // przypisz role
-		        userService.assignRole("admin", "ROLE_ADMIN").get();
-		        userService.assignRole("admin", "ROLE_USER").get();
+				// przypisz role
+				userService.assignRole("admin", "ROLE_ADMIN").get();
+				userService.assignRole("admin", "ROLE_USER").get();
 
-		        LoggerUtil.log(Level.INFO, "Utworzono domyślnego admina 'admin' (hasło: admin) - wymuszono zmianę hasła przy pierwszym logowaniu!");
-		    } else {
-		        LoggerUtil.log(Level.INFO, "Admin już istnieje.");
-		    }
+				LoggerUtil.log(Level.INFO,
+						"Utworzono domyślnego admina 'admin' (hasło: admin) - wymuszono zmianę hasła przy pierwszym logowaniu!");
+			} else {
+				LoggerUtil.log(Level.INFO, "Admin już istnieje.");
+			}
 		} catch (Exception ex) {
-		    LoggerUtil.error("Błąd podczas inicjalizacji ról/użytkownika admin", ex);
+			LoggerUtil.error("Błąd podczas inicjalizacji ról/użytkownika admin", ex);
 		}
 
 		// 3) Pokaż dialog logowania i (po powodzeniu) GUI - dialog jest modalny i
@@ -96,7 +99,7 @@ public class Main {
 		// 4) Po udanym logowaniu uruchamiamy główne GUI na EDT
 		SwingUtilities.invokeLater(() -> {
 			try {
-				MainGUI gui = new MainGUI(personService, employeeService, studentService);
+				MainGUI gui = new MainGUI(personService, employeeService, studentService, statisticsService);
 				// opcjonalnie pokaż kto jest zalogowany w tytule
 				AuthManager.get().getCurrentUser()
 						.ifPresent(u -> gui.setTitle(gui.getTitle() + " — zalogowany: " + u.getUsername()));

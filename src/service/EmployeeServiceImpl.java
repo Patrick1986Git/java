@@ -72,6 +72,18 @@ public class EmployeeServiceImpl implements EmployeeService {
 	}
 
 	@Override
+	public CompletableFuture<List<Employee>> findAll() {
+		return CompletableFuture.supplyAsync(() -> {
+			try {
+				return repository.findAll();
+			} catch (Exception ex) {
+				LoggerUtil.error("Error finding all employees", ex);
+				throw new RuntimeException(ex);
+			}
+		}, AppExecutors.DB_EXECUTOR);
+	}
+
+	@Override
 	public CompletableFuture<Employee> update(Employee employee) {
 		return CompletableFuture.supplyAsync(() -> {
 			try {
